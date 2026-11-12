@@ -1,60 +1,193 @@
-
-using System.Text.Json;
+using System.Globalization;
+using System.Text;
 using ClosedXML.Excel;
 
-var path = args.Length > 0 ? args[0] : "vedomost.xlsx";
-if (!File.Exists(path))
-{
-    Console.Error.WriteLine($"Файл не найден: {path}");
-    return 1;
-}
-
 var config = new VedomostConfig();
+
+if (args.Length == 0)
+{
+Console.WriteLine("Использование: ConsoleBasedParser <файл_ведомости.xlsx> [результат.csv]");
+return 1;
+}
+
+string inputPath = args[0];
+string outputPath = args.Length > 1 ? args[1] : Path.ChangeExtension(inputPath, ".csv");
+
+if (!File.Exists(inputPath))
+{
+Console.WriteLine($"Ошибка: файл «{inputPath}» не найден.");
+return 1;
+}
+
 var parser = new VedomostParser(config);
-var rows = parser.Parse(path);
+var (records, problems) = parser.Parse(inputPath);
 
-Console.WriteLine($"Распознано строк: {rows.Count}");
-foreach (var r in rows)
-    Console.WriteLine($"{r.TabNumber,-10} {r.FullName,-40} {r.ToPay,12:N2}");
+Console.WriteLine($"Распознано строк: {records.Count}");
+foreach (var rec in records)
+Console.WriteLine($"{rec.FullName,-35} {rec.Subject,-25} {rec.Date:dd.MM.yyyy} оценка: {rec.Grade}");
 
-if (parser.Errors.Count > 0)
+if (problems.Count > 0)
 {
-    Console.WriteLine($"\nПроблемные строки: {parser.Errors.Count}");
-    foreach (var e in parser.Errors)
-        Console.WriteLine($"  строка {e.ExcelRow}: {e.Message}");
+Console.WriteLine();
+Console.WriteLine($"Проблемные строки: {problems.Count}");
+foreach (var problem in problems)
+Console.WriteLine(" " + problem);
 }
 
-var totalRows = rows.Sum(r => r.ToPay);
-Console.WriteLine($"\nСумма «к выплате» по строкам: {totalRows:N2}");
-
-string? totalFromFile = ReadTotalCell(path);
-if (decimal.TryParse(totalFromFile?.Replace(" ", "").Replace("\u00A0", "").Replace(",", "."),
-                     out var fileTotal))
-{
-    if (Math.Abs(totalRows - fileTotal) > 0.01m)
-        Console.WriteLine($"ВНИМАНИЕ: расхождение с итогом файла {fileTotal:N2} — проверьте ведомость!");
-    else
-        Console.WriteLine("Контрольная сумма сходится");
-}
-
-var json = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
-File.WriteAllText("result.json", json);
-Console.WriteLine("Результат сохранён в result.json");
+CsvExporter.Save(records, outputPath);
+Console.WriteLine();
+Console.WriteLine($"Результат сохранён в {outputPath}");
 return 0;
 
-static string? ReadTotalCell(string path)
+public class VedomostConfig
 {
-    using var wb = new XLWorkbook(path);
-    var ws = wb.Worksheets.First();
-    foreach (var row in ws.RowsUsed())
-    {
-        if (row.Cell(1).GetString().ToLower().Contains("итог"))
-        {
-            var cells = row.CellsUsed().Where(c => decimal.TryParse(
-                c.GetString().Replace(" ", "").Replace("\u00A0", "").Replace(",", "."), out _));
-            var last = cells.LastOrDefault();
-            return last?.GetString();
-        }
-    }
-    return null;
+public string NameKeyword { get; init; } = "фио";
+public string SubjectKeyword { get; init; } = "дисциплин";
+public string DateKeyword { get; init; } = "дат";
+public string GradeKeyword { get; init; } = "оцен";
+public int HeaderSearchDepth { get; init; } = 10;
+}
+
+public record VedomostRecord(string FullName, string Subject, DateTime? Date, int? Grade);
+
+public class VedomostParser
+{
+private readonly VedomostConfig _config;
+
+public VedomostParser(VedomostConfig config) => _config = config;
+
+public (List<VedomostRecord> Records, List<string> Problems) Parse(string path)
+{
+var records = new List<VedomostRecord>();
+var problems = new List<string>();
+
+using var workbook = new XLWorkbook(path);
+var sheet = workbook.Worksheets.First();
+
+var header = FindHeaderRow(sheet);
+if (header is null)
+throw new InvalidOperationException("Не найдена строка с заголовками.");
+
+int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+var culture = CultureInfo.GetCultureInfo("ru-RU");
+
+for (int r = header.Value.Row + 1; r <= lastRow; r++)
+{
+var row = sheet.Row(r);
+string fullName = CellText(row, header.Value.Name);
+string subject = CellText(row, header.Value.Subject);
+
+if (fullName.Length == 0 && subject.Length == 0)
+continue; // пустая строка
+
+if (fullName.Length == 0)
+{
+problems.Add($"строка {r}: нет ФИО");
+continue;
+}
+
+DateTime? date = ParseDate(row.Cell(header.Value.Date), culture);
+if (date is null)
+problems.Add($"строка {r}: не удалось прочитать «дату»: «{row.Cell(header.Value.Date).GetString()}»");
+
+int? grade = ParseGrade(row.Cell(header.Value.Grade));
+if (grade is null)
+problems.Add($"строка {r}: не удалось прочитать «оценку»: «{row.Cell(header.Value.Grade).GetString()}»");
+
+records.Add(new VedomostRecord(fullName, subject, date, grade));
+}
+
+return (records, problems);
+}
+
+private (int Row, int Name, int Subject, int Date, int Grade)? FindHeaderRow(IXLWorksheet sheet)
+{
+int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+int limit = Math.Min(_config.HeaderSearchDepth, lastRow);
+
+for (int r = 1; r <= limit; r++)
+{
+int? name = FindColumn(sheet.Row(r), _config.NameKeyword);
+int? subject = FindColumn(sheet.Row(r), _config.SubjectKeyword);
+int? date = FindColumn(sheet.Row(r), _config.DateKeyword);
+int? grade = FindColumn(sheet.Row(r), _config.GradeKeyword);
+
+if (name.HasValue && subject.HasValue && date.HasValue && grade.HasValue)
+return (r, name.Value, subject.Value, date.Value, grade.Value);
+}
+for (int r = 1; r <= limit; r++)
+{
+var cells = sheet.Row(r).CellsUsed()
+.Select(c => c.GetString().Trim())
+.Where(s => s.Length > 0);
+Console.WriteLine($"Строка {r}: {string.Join(" | ", cells)}");
+}
+return null;
+}
+
+private static int? FindColumn(IXLRow row, string keyword)
+{
+foreach (var cell in row.CellsUsed())
+{
+string text = cell.GetString().Trim().ToLowerInvariant();
+if (text.Contains(keyword))
+return cell.Address.ColumnNumber;
+}
+return null;
+}
+
+private static string CellText(IXLRow row, int column) =>
+row.Cell(column).GetString().Trim();
+
+private static DateTime? ParseDate(IXLCell cell, CultureInfo culture)
+{
+if (cell.DataType == XLDataType.DateTime)
+return cell.GetDateTime();
+
+string text = cell.GetString().Trim();
+if (text.Length == 0)
+return null;
+
+if (DateTime.TryParseExact(text, "dd.MM.yyyy", culture, DateTimeStyles.None, out var d))
+return d;
+
+return DateTime.TryParse(text, culture, DateTimeStyles.None, out d) ? d : null;
+}
+
+private static int? ParseGrade(IXLCell cell)
+{
+string text = cell.GetString().Trim();
+// на случай «5 (отлично)» — берём число до пробела
+string head = text.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+return int.TryParse(head, out int grade) ? grade : null;
+}
+}
+
+public static class CsvExporter
+{
+public static void Save(IEnumerable<VedomostRecord> records, string path)
+{
+var sb = new StringBuilder();
+sb.AppendLine("ФИО;Дисциплина;Дата;Оценка");
+
+foreach (var r in records)
+{
+sb.AppendLine(string.Join(';',
+Escape(r.FullName),
+Escape(r.Subject),
+r.Date?.ToString("dd.MM.yyyy") ?? "",
+r.Grade?.ToString() ?? ""));
+}
+
+// BOM нужен, чтобы Excel корректно открыл кириллицу
+File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+}
+
+private static string Escape(string? value)
+{
+value ??= "";
+if (value.Contains(';') value.Contains('"') value.Contains('\n'))
+return $"\"{value.Replace("\"", "\"\"")}\"";
+return value;
+}
 }
