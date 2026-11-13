@@ -1,0 +1,12 @@
+
+<!-- Корневое описание приложения.
+     x:Class связывает этот XAML с классом App из App.axaml.cs. -->
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ConsoleBasedParser.App"
+             RequestedThemeVariant="Default">
+    <Application.Styles>
+        <!-- Стандартная тема в стиле Windows 11. -->
+        <FluentTheme />
+    </Application.Styles>
+</Application>

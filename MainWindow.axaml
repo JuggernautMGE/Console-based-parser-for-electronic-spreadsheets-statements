@@ -1,0 +1,38 @@
+<!-- Разметка главного окна: внешний вид без логики.
+     Обработчики кнопок описаны в MainWindow.axaml.cs. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ConsoleBasedParser.MainWindow"
+        Icon="avares://ConsoleBasedParser/Assets/appicon.ico"
+        Title="Парсер ведомостей"
+        Width="820" Height="620">
+
+    <DockPanel Margin="12">
+        <!-- Кнопка открытия файла: x:Name нужен для доступа из кода. -->
+        <Button DockPanel.Dock="Top" x:Name="OpenButton" Content="Открыть ведомость…"
+                Padding="14,7" Click="OnOpenFile" FontWeight="SemiBold"/>
+
+        <!-- Нижняя панель: статус слева (колонка * — всё свободное место),
+             кнопки экспорта справа (Auto — по содержимому). -->
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto,Auto" Margin="0,10,0,0">
+            <!-- Статус: только чтение, текст меняется из кода. -->
+            <TextBox x:Name="StatusText" Grid.Column="0"
+                     Text="Откройте файл ведомости (.xlsx)"
+                     TextWrapping="Wrap" MaxHeight="80" IsReadOnly="True"
+                     VerticalAlignment="Center"/>
+
+            <!-- Экспорт: спрятаны и неактивны до успешного разбора файла,
+                 показываются из MainWindow.axaml.cs. -->
+            <Button x:Name="CsvButton" Grid.Column="1" Content="Экспорт в CSV"
+                    Padding="14,7" Margin="10,0,0,0" Click="OnExportCsv"
+                    IsEnabled="False" IsVisible="False"/>
+            <Button x:Name="JsonButton" Grid.Column="2" Content="Экспорт в JSON"
+                    Padding="14,7" Margin="10,0,0,0" Click="OnExportJson"
+                    IsEnabled="False" IsVisible="False"/>
+        </Grid>
+
+        <!-- Превью ведомости: моношрифт выравнивает колонки. -->
+        <TextBox x:Name="PreviewText" IsReadOnly="True" TextWrapping="Wrap"
+                 FontFamily="Consolas, Menlo, monospace" Text=""/>
+    </DockPanel>
+</Window>
