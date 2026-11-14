@@ -23,14 +23,14 @@ public partial class MainWindow : Window
     // и выводит результат в окно.
     private async void OnOpenFile(object? sender, RoutedEventArgs e)
     {
-        // Диалог выбора файла: только один файл, только .xlsx.
+        // Диалог выбора файла: один файл, форматы Excel (старые и новые).
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Выберите файл ведомости",
             AllowMultiple = false,
-            FileTypeFilter = new FilePickerFileType[]
+             FileTypeFilter = new FilePickerFileType[]
             {
-                new("Ведомость Excel") { Patterns = new[] { "*.xlsx" } }
+                new("Файлы Excel") { Patterns = new[] { "*.xls", "*.xlsx", "*.xlsm", "*.xlsb", "*.xltx", "*.xltm" } }
             }
         });
 
